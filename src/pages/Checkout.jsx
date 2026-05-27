@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { clearCart } from '../features/cart/cartSlice';
+import { addOrder } from '../features/orders/ordersSlice';
 import { useToast } from '../context/ToastContext';
 import { CreditCard, MapPin, CheckCircle } from 'lucide-react';
 
@@ -14,16 +15,50 @@ export default function Checkout() {
   const [shipping, setShipping] = useState({ fullName: '', address: '', city: '', zip: '', country: '' });
   const [payment, setPayment] = useState({ cardNumber: '', expiry: '', cvv: '', cardName: '' });
   const [placed, setPlaced] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
   const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const total = subtotal > 50 ? subtotal : subtotal + 5.99;
 
   const handlePlaceOrder = (e) => {
     e.preventDefault();
-    setPlaced(true);
-    dispatch(clearCart());
-    addToast('Order placed successfully!');
-    setTimeout(() => navigate('/'), 3000);
+    if (items.length === 0) {
+      addToast('Your cart is empty. Please add items first.', 'error');
+      return;
+    }
+
+    setProcessing(true);
+    const now = new Date();
+    const cardDigits = String(payment.cardNumber || '').replace(/\D/g, '');
+    const last4 = cardDigits.slice(-4);
+    const orderId = `${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const order = {
+      id: orderId,
+      createdAt: now.toISOString(),
+      status: 'Paid',
+      shipping: { ...shipping },
+      payment: {
+        cardName: payment.cardName,
+        last4: last4 || '----',
+      },
+      items: items.map((i) => ({ ...i })),
+      summary: {
+        subtotal,
+        shippingCost: subtotal > 50 ? 0 : 5.99,
+        total,
+      },
+    };
+
+    // Simulate payment completion, then store the order and clear cart.
+    setTimeout(() => {
+      dispatch(addOrder(order));
+      dispatch(clearCart());
+      setProcessing(false);
+      setPlaced(true);
+      addToast('Order placed successfully!');
+      setTimeout(() => navigate('/orders'), 2500);
+    }, 2000);
   };
 
   if (placed) {
@@ -35,7 +70,13 @@ export default function Checkout() {
           </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Order Placed!</h2>
           <p className="text-gray-500 dark:text-gray-400">Thank you for your purchase. You will receive a confirmation email shortly.</p>
-          <p className="text-sm text-indigo-600 dark:text-indigo-400">Redirecting to home...</p>
+          <p className="text-sm text-indigo-600 dark:text-indigo-400">Redirecting to Orders...</p>
+          <Link
+            to="/orders"
+            className="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-3 rounded-xl transition-colors w-full"
+          >
+            View Orders
+          </Link>
         </div>
       </div>
     );
@@ -120,8 +161,14 @@ export default function Checkout() {
                   <button type="button" onClick={() => setStep(1)} className="flex-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-semibold py-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     Back
                   </button>
-                  <button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors">
-                    Place Order
+                  <button
+                    type="submit"
+                    disabled={processing}
+                    className={`flex-1 font-semibold py-3 rounded-xl transition-colors ${
+                      processing ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
+                  >
+                    {processing ? 'Processing...' : 'Place Order'}
                   </button>
                 </div>
               </form>

@@ -24,7 +24,8 @@ A modern, responsive e-Commerce platform built with React, Vite, and Redux Toolk
 - Product Details page with ratings and Add to Cart / Wishlist
 - Cart with quantity controls and order summary
 - Wishlist — toggle favourites
-- Checkout (shipping + payment UI, mock order)
+- Checkout (shipping + payment UI, mock order saved to Orders)
+- Orders page to view completed purchases after payment
 - Responsive design for mobile, tablet, and desktop
 
 ### Bonus
@@ -44,6 +45,7 @@ A modern, responsive e-Commerce platform built with React, Vite, and Redux Toolk
 | `productSlice` | fetchProducts, fetchCategories, filters, sort, search |
 | `cartSlice` | add/remove/increment/decrement/clear |
 | `wishlistSlice` | toggle/remove wishlist items |
+| `ordersSlice` | store completed orders after checkout |
 
 ## ⚙️ Setup
 
@@ -70,8 +72,9 @@ src/
 │   ├── products/productSlice.js
 │   ├── cart/cartSlice.js
 │   └── wishlist/wishlistSlice.js
+│   └── orders/ordersSlice.js
 ├── components/          # Navbar, ProductCard, SkeletonCard, ProtectedRoute
-├── pages/               # Home, Login, Signup, ProductList, ProductDetails, Cart, Wishlist, Checkout
+├── pages/               # Home, Login, Signup, ProductList, ProductDetails, Cart, Wishlist, Checkout, Orders
 ├── hooks/useDebounce.js
 ├── context/             # ToastContext, ThemeContext
 ├── App.jsx

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
-import { ShoppingCart, Heart, Sun, Moon, Menu, X, LogOut, Store } from 'lucide-react';
+import { ShoppingCart, Heart, Sun, Moon, Menu, X, LogOut, Store, Receipt } from 'lucide-react';
 import { logout } from '../features/auth/authSlice';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
@@ -35,7 +35,13 @@ export default function Navbar() {
             <Link to="/" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Home</Link>
             <Link to="/products" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Products</Link>
             {isAuthenticated && (
-              <span className="text-gray-500 dark:text-gray-400">Hi, {user?.name?.split(' ')[0]}</span>
+              <>
+                <Link to="/orders" className="flex items-center gap-2 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  <Receipt size={16} />
+                  Orders
+                </Link>
+                <span className="text-gray-500 dark:text-gray-400">Hi, {user?.name?.split(' ')[0]}</span>
+              </>
             )}
           </div>
 
@@ -85,6 +91,7 @@ export default function Navbar() {
           <Link to="/products" onClick={() => setMenuOpen(false)}>Products</Link>
           <Link to="/wishlist" onClick={() => setMenuOpen(false)}>Wishlist</Link>
           <Link to="/cart" onClick={() => setMenuOpen(false)}>Cart</Link>
+              {isAuthenticated && <Link to="/orders" onClick={() => setMenuOpen(false)}>Orders</Link>}
           {isAuthenticated ? (
             <button onClick={() => { handleLogout(); setMenuOpen(false); }} className="text-left text-red-500">Logout</button>
           ) : (
