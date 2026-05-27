@@ -4,7 +4,7 @@ A modern, responsive e-Commerce platform built with React, Vite, and Redux Toolk
 
 ## 🚀 Live Demo
 
-[Live on Netlify](#) *(deployment link will be added after deploy)*
+[https://monumental-alfajores-5e902e.netlify.app](https://monumental-alfajores-5e902e.netlify.app)
 
 ## 🛠 Tech Stack
 
