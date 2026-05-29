@@ -1,5 +1,7 @@
 # KoinX - Tax Loss Harvesting & Optimization Dashboard
 
+**Live Production Link**: [https://konix-alpha.vercel.app](https://konix-alpha.vercel.app)
+
 Welcome to the **KoinX Tax Loss Harvesting Dashboard**! This application is a high-fidelity, fully interactive frontend tool built using **React**, **TypeScript**, **Vite**, and **Vanilla CSS**. It enables crypto investors to track their capital gains liabilities and simulate tax-loss harvesting by realizing strategic losses.
 
 ---
