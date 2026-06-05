@@ -1,0 +1,44 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/.qdrant_data/
+backend/data/
+*.log
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+
+# Env / secrets
+.env
+.env.local
+backend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Binaries / tunnels
+*.exe
+cloudflared.exe
+
+# Lock files (regenerated on install)
+package-lock.json
+yarn.lock
+
+# Media scratch
+*.part
+*.webm
+*.m4a
+*.mp3
+backend/.cache/
+
+# Auth cookies — never commit
+*cookies*.txt
+ig_cookies.txt
+backend/ig_cookies.txt
