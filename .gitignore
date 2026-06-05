@@ -23,6 +23,14 @@ frontend/.env.local
 .DS_Store
 Thumbs.db
 
+# Binaries / tunnels
+*.exe
+cloudflared.exe
+
+# Lock files (regenerated on install)
+package-lock.json
+yarn.lock
+
 # Media scratch
 *.part
 *.webm
