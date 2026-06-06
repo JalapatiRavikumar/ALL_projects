@@ -118,11 +118,37 @@ def _youtube_captions(native_id: str) -> list[dict] | None:
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         api = YouTubeTranscriptApi()
-        fetched = api.fetch(native_id, languages=["en", "en-US", "en-GB"])
+
+        # Try manual captions first, then auto-generated — covers almost all YouTube videos
+        transcript_list = api.list(native_id)
+        fetched = None
+
+        # prefer manual English
+        for t in transcript_list:
+            if not t.is_generated and t.language_code.startswith("en"):
+                fetched = t.fetch()
+                break
+
+        # fall back to any auto-generated
+        if fetched is None:
+            for t in transcript_list:
+                if t.is_generated:
+                    fetched = t.fetch()
+                    break
+
+        # fall back to any language at all
+        if fetched is None:
+            for t in transcript_list:
+                fetched = t.fetch()
+                break
+
+        if fetched is None:
+            return None
+
         segs = [
             {"text": s.text.strip(), "start": float(s.start), "end": float(s.start) + float(s.duration)}
             for s in fetched
-            if s.text.strip() and s.text.strip() != "[Music]"
+            if s.text.strip() and s.text.strip() not in ("[Music]", "[Applause]", "[Laughter]")
         ]
         return segs or None
     except Exception:
@@ -137,8 +163,10 @@ def _whisper_fallback(url: str) -> list[dict] | None:
     os.makedirs(settings.cache_dir, exist_ok=True)
     tmp = tempfile.mkdtemp(dir=settings.cache_dir)
     opts = _ydl_opts(skip_download=False)
+    # Download only the first 90 seconds of audio to keep Whisper fast on CPU
     opts["format"] = "bestaudio/best"
     opts["outtmpl"] = os.path.join(tmp, "audio.%(ext)s")
+    opts["postprocessor_args"] = {"ffmpeg": ["-t", "90"]}
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -153,15 +181,17 @@ def _whisper_fallback(url: str) -> list[dict] | None:
         return None
 
 
-MAX_WHISPER_SECS = 300
+MAX_WHISPER_SECS = 600  # only skip Whisper for very long videos (10min+)
 
 
 def _get_transcript(meta: VideoMetadata) -> tuple[list[dict], str]:
+    # YouTube: always try captions first (instant, free, covers auto-generated too)
     if meta.platform == "youtube" and meta.native_id:
         segs = _youtube_captions(meta.native_id)
         if segs:
             return segs, "captions"
 
+    # Skip Whisper for very long videos — would take too long on CPU
     if (meta.duration_seconds or 0) > MAX_WHISPER_SECS:
         return [], "skipped_too_long"
 
