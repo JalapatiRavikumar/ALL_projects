@@ -1,4 +1,3 @@
-"""Pydantic models shared across API + services."""
 from __future__ import annotations
 
 from typing import Literal, Optional
@@ -7,8 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class IngestRequest(BaseModel):
-    url_a: str = Field(..., description="YouTube or Instagram Reel URL for Video A")
-    url_b: str = Field(..., description="YouTube or Instagram Reel URL for Video B")
+    url_a: str
+    url_b: str
 
 
 class VideoMetadata(BaseModel):
@@ -23,13 +22,13 @@ class VideoMetadata(BaseModel):
     views: Optional[int] = None
     likes: Optional[int] = None
     comments: Optional[int] = None
-    upload_date: Optional[str] = None        # ISO-ish (YYYY-MM-DD)
+    upload_date: Optional[str] = None
     duration_seconds: Optional[int] = None
     hashtags: list[str] = Field(default_factory=list)
     thumbnail: Optional[str] = None
-    engagement_rate: Optional[float] = None  # (likes + comments) / views * 100
+    engagement_rate: Optional[float] = None
     transcript_chars: int = 0
-    transcript_source: Optional[str] = None  # "captions" | "whisper" | "none"
+    transcript_source: Optional[str] = None
     chunk_count: int = 0
 
 

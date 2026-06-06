@@ -1,6 +1,6 @@
-"""FastAPI application: ingest + streaming RAG chat."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import traceback
@@ -14,7 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import chat_service, chunking, embeddings, ingest, sessions, vectorstore
 from .config import get_settings
-from .models import ChatRequest, IngestRequest, IngestResponse
+from .models import ChatRequest, IngestRequest, IngestResponse, VideoMetadata
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,12 +25,11 @@ logger = logging.getLogger("ragapp")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm the embedding model + vector store so first request is snappy.
     try:
         embeddings.warmup()
         vectorstore.get_client()
-        logger.info("startup warmup complete (embeddings + vector store ready)")
-    except Exception as exc:  # pragma: no cover
+        logger.info("startup complete")
+    except Exception as exc:
         logger.warning("startup warmup skipped: %s", exc)
     yield
 
@@ -41,7 +40,7 @@ settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_origin_regex=r"https://.*\.vercel\.app",  # allow all Vercel preview URLs
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,16 +48,11 @@ app.add_middleware(
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    """Surface real error detail instead of a blank 'Internal Server Error'."""
+async def global_error_handler(request: Request, exc: Exception):
     logger.error("Unhandled error on %s:\n%s", request.url.path, traceback.format_exc())
     return JSONResponse(
         status_code=500,
-        content={
-            "error": type(exc).__name__,
-            "detail": str(exc),
-            "path": request.url.path,
-        },
+        content={"error": type(exc).__name__, "detail": str(exc), "path": request.url.path},
     )
 
 
@@ -69,30 +63,19 @@ def health():
 
 @app.post("/api/ingest", response_model=IngestResponse)
 async def ingest_videos(req: IngestRequest):
-    """Pull metadata + transcripts for both videos, chunk, embed, store.
-
-    Both videos are processed CONCURRENTLY via asyncio.gather so the total
-    wall-clock time is ~max(time_A, time_B) instead of time_A + time_B.
-    Each stage is guarded so a failure on one video degrades gracefully into
-    a warning instead of failing the whole request.
-    """
-    import asyncio
-
     if not req.url_a or not req.url_b:
         raise HTTPException(status_code=422, detail="Both url_a and url_b are required.")
 
     session_id = uuid.uuid4().hex
 
-    async def _process_one(vid: str, url: str) -> tuple[any, list[dict], list[str]]:
-        """Ingest + chunk + embed one video. Returns (meta, chunks_stored, warnings)."""
+    async def process(vid: str, url: str):
         warns: list[str] = []
         try:
             meta, segments, w = await asyncio.to_thread(ingest.ingest_video, vid, url)
             warns.extend(w)
         except Exception as exc:
-            logger.error("ingest_video failed for %s: %s", vid, traceback.format_exc())
-            warns.append(f"Video {vid}: ingestion error ({type(exc).__name__}: {exc})")
-            from .models import VideoMetadata
+            logger.error("ingest failed for %s: %s", vid, traceback.format_exc())
+            warns.append(f"Video {vid}: {type(exc).__name__}: {exc}")
             meta = VideoMetadata(
                 video_id=vid,  # type: ignore[arg-type]
                 platform=ingest.detect_platform(url),  # type: ignore[arg-type]
@@ -105,35 +88,29 @@ async def ingest_videos(req: IngestRequest):
             chunks = await asyncio.to_thread(chunking.chunk_segments, segments)
             stored = await asyncio.to_thread(vectorstore.upsert_chunks, session_id, vid, chunks)
             meta.chunk_count = stored
-            logger.info("ingest %s: stored %d chunks (source=%s)", vid, stored, meta.transcript_source)
         except Exception as exc:
             logger.error("index failed for %s: %s", vid, traceback.format_exc())
-            warns.append(f"Video {vid}: indexing error ({type(exc).__name__}: {exc})")
-            meta.chunk_count = 0
+            warns.append(f"Video {vid}: indexing error: {exc}")
 
         return meta, warns
 
-    # Run A and B at the same time — cuts wall-clock time roughly in half.
-    logger.info("ingest A+B concurrently: %s | %s", req.url_a, req.url_b)
     (meta_a, warns_a), (meta_b, warns_b) = await asyncio.gather(
-        _process_one("A", req.url_a),
-        _process_one("B", req.url_b),
+        process("A", req.url_a),
+        process("B", req.url_b),
     )
 
-    all_warnings = [*warns_a, *warns_b]
     sessions.save(session_id, {"A": meta_a.model_dump(), "B": meta_b.model_dump()})
 
     return IngestResponse(
         session_id=session_id,
         video_a=meta_a,
         video_b=meta_b,
-        warnings=all_warnings,
+        warnings=[*warns_a, *warns_b],
     )
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    """Server-Sent Events stream of tokens + citations."""
     if not sessions.exists(req.session_id):
         raise HTTPException(status_code=404, detail="Unknown session_id")
 

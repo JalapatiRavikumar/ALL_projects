@@ -1,29 +1,32 @@
-"""Streaming chat orchestration.
-
-We use the LangGraph graph for retrieval + memory, but drive token streaming
-ourselves so we can emit citations alongside the streamed text.
-
-Flow per turn:
-  1. Append the user message into graph state (persisted by the checkpointer ->
-     gives us cross-turn memory automatically).
-  2. Run the `retrieve` node to get this turn's chunks.
-  3. Stream tokens from the LLM grounded in metadata + chunks.
-  4. Persist the final assistant message back into the checkpointer so the next
-     turn remembers it.
-
-Yields dict events: {"type": "citations"|"token"|"done"|"error", ...}.
-"""
 from __future__ import annotations
 
+import logging
+import traceback
 from typing import Any, AsyncIterator
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from . import rag_graph, sessions
 
+logger = logging.getLogger("ragapp")
+
 
 def _config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
+
+
+def _extract_text(chunk: Any) -> str:
+    content = getattr(chunk, "content", None)
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            p if isinstance(p, str) else p.get("text", "") if isinstance(p, dict) else ""
+            for p in content
+        )
+    return str(content)
 
 
 async def stream_chat(session_id: str, message: str) -> AsyncIterator[dict[str, Any]]:
@@ -35,19 +38,17 @@ async def stream_chat(session_id: str, message: str) -> AsyncIterator[dict[str, 
     graph = rag_graph.get_graph()
     config = _config(session_id)
 
-    # 1) Load prior history from the checkpointer for memory.
     prior_messages = []
     try:
         snapshot = graph.get_state(config)
         if snapshot and snapshot.values:
             prior_messages = snapshot.values.get("messages", [])
     except Exception:
-        prior_messages = []
+        pass
 
     user_msg = HumanMessage(content=message)
     history = [*prior_messages, user_msg]
 
-    # 2) Retrieve chunks for this turn.
     retrieve_state = {
         "messages": history,
         "session_id": session_id,
@@ -57,7 +58,6 @@ async def stream_chat(session_id: str, message: str) -> AsyncIterator[dict[str, 
     }
     retrieved = rag_graph._retrieve_node(retrieve_state)["retrieved"]
 
-    # Emit citations up-front so the UI can render source pills immediately.
     citations = [
         {
             "video_id": h["video_id"],
@@ -71,41 +71,34 @@ async def stream_chat(session_id: str, message: str) -> AsyncIterator[dict[str, 
     ]
     yield {"type": "citations", "citations": citations}
 
-    # 3) Stream the grounded answer.
-    gen_state: dict = {
+    turn_messages = rag_graph._build_turn_messages({
         "messages": history,
         "session_id": session_id,
         "metadata": metadata,
         "retrieved": retrieved,
         "question": message,
-    }
-    turn_messages = rag_graph._build_turn_messages(gen_state)
+    })
 
     llm = rag_graph._get_llm()
     full_text = ""
     try:
         async for chunk in llm.astream(turn_messages):
-            token = _chunk_text(chunk)
+            token = _extract_text(chunk)
             if token:
                 full_text += token
                 yield {"type": "token", "text": token}
     except Exception as exc:
-        import logging, traceback
-        logging.getLogger("ragapp").error(
-            "LLM stream error: %s\n%s", exc, traceback.format_exc()
-        )
-        err_msg = str(exc)
-        # Surface quota / auth errors clearly so the user knows what to fix.
-        if "429" in err_msg or "quota" in err_msg.lower() or "rate" in err_msg.lower():
-            err_msg = f"LLM quota / rate-limit exceeded. Check your API key and billing. Detail: {exc}"
-        elif "401" in err_msg or "auth" in err_msg.lower() or "api key" in err_msg.lower():
-            err_msg = f"LLM authentication failed. Check your API key in backend/.env. Detail: {exc}"
+        logger.error("LLM stream error: %s\n%s", exc, traceback.format_exc())
+        msg = str(exc)
+        if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
+            msg = f"LLM quota/rate-limit exceeded — check your API key. Detail: {exc}"
+        elif "401" in msg or "auth" in msg.lower():
+            msg = f"LLM auth failed — check your API key in .env. Detail: {exc}"
         else:
-            err_msg = f"LLM error ({type(exc).__name__}): {exc}"
-        yield {"type": "error", "message": err_msg}
+            msg = f"LLM error ({type(exc).__name__}): {exc}"
+        yield {"type": "error", "message": msg}
         return
 
-    # 4) Persist this turn (user + assistant) into the checkpointer for memory.
     try:
         graph.update_state(
             config,
@@ -120,21 +113,3 @@ async def stream_chat(session_id: str, message: str) -> AsyncIterator[dict[str, 
         pass
 
     yield {"type": "done", "citations": citations}
-
-
-def _chunk_text(chunk: Any) -> str:
-    content = getattr(chunk, "content", None)
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    # Some providers stream content as a list of parts.
-    if isinstance(content, list):
-        out = []
-        for part in content:
-            if isinstance(part, str):
-                out.append(part)
-            elif isinstance(part, dict) and "text" in part:
-                out.append(part["text"])
-        return "".join(out)
-    return str(content)
