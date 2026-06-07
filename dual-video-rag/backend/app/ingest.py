@@ -116,42 +116,56 @@ def _build_metadata(video_id: str, url: str, platform: str, info: dict) -> Video
 
 def _youtube_captions(native_id: str) -> list[dict] | None:
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
+
         api = YouTubeTranscriptApi()
+        tl = api.list(native_id)
 
-        # Try manual captions first, then auto-generated — covers almost all YouTube videos
-        transcript_list = api.list(native_id)
+        # Try in order: manual English → auto English → any auto → any manual → any
         fetched = None
-
-        # prefer manual English
-        for t in transcript_list:
-            if not t.is_generated and t.language_code.startswith("en"):
-                fetched = t.fetch()
-                break
-
-        # fall back to any auto-generated
+        try:
+            fetched = tl.find_manually_created_transcript(["en", "en-US", "en-GB"]).fetch()
+        except Exception:
+            pass
         if fetched is None:
-            for t in transcript_list:
-                if t.is_generated:
+            try:
+                fetched = tl.find_generated_transcript(["en", "en-US", "en-GB"]).fetch()
+            except Exception:
+                pass
+        if fetched is None:
+            try:
+                # any auto-generated in any language
+                for t in tl:
+                    if t.is_generated:
+                        fetched = t.fetch()
+                        break
+            except Exception:
+                pass
+        if fetched is None:
+            try:
+                # any transcript at all
+                for t in tl:
                     fetched = t.fetch()
                     break
+            except Exception:
+                pass
 
-        # fall back to any language at all
-        if fetched is None:
-            for t in transcript_list:
-                fetched = t.fetch()
-                break
-
-        if fetched is None:
+        if not fetched:
             return None
 
         segs = [
-            {"text": s.text.strip(), "start": float(s.start), "end": float(s.start) + float(s.duration)}
+            {
+                "text": s.text.strip(),
+                "start": float(s.start),
+                "end": float(s.start) + float(s.duration),
+            }
             for s in fetched
             if s.text.strip() and s.text.strip() not in ("[Music]", "[Applause]", "[Laughter]")
         ]
         return segs or None
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("ragapp").debug("Caption fetch failed for %s: %s", native_id, e)
         return None
 
 
@@ -203,6 +217,9 @@ def _get_transcript(meta: VideoMetadata) -> tuple[list[dict], str]:
 
 
 def ingest_video(video_id: str, url: str) -> tuple[VideoMetadata, list[dict], list[str]]:
+    import logging
+    logger = logging.getLogger("ragapp")
+
     warnings: list[str] = []
     platform = detect_platform(url)
 
@@ -213,9 +230,13 @@ def ingest_video(video_id: str, url: str) -> tuple[VideoMetadata, list[dict], li
         info = {}
 
     meta = _build_metadata(video_id, url, platform, info)
+    logger.info("ingest %s: platform=%s native_id=%s duration=%s", video_id, platform, meta.native_id, meta.duration_seconds)
+
     segments, source = _get_transcript(meta)
     meta.transcript_source = source
     meta.transcript_chars = sum(len(s["text"]) for s in segments)
+
+    logger.info("ingest %s: transcript source=%s segments=%d", video_id, source, len(segments))
 
     if source == "none":
         warnings.append(f"Video {video_id}: no transcript found (no captions, STT failed)")
@@ -223,7 +244,7 @@ def ingest_video(video_id: str, url: str) -> tuple[VideoMetadata, list[dict], li
         dur = meta.duration_seconds or 0
         warnings.append(
             f"Video {video_id}: no captions and video is {dur // 60}m {dur % 60}s "
-            f"— Whisper skipped (limit 5 min)"
+            f"— Whisper skipped (limit 10 min)"
         )
 
     return meta, segments, warnings
