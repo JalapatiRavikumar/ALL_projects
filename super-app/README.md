@@ -2,6 +2,10 @@
 
 A premium, multi-page Next.js entertainment dashboard featuring registration, category selection, a real-time widget dashboard, and a genre-filtered movie discovery page.
 
+## 🚀 Live Demo
+
+**[https://super-app-dashboard-psi.vercel.app](https://super-app-dashboard-psi.vercel.app)**
+
 ## 🚀 Live Features
 
 | Page | Route | Description |
